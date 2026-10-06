@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -32,16 +32,16 @@ export default function Home() {
   });
 
   const [analysis, setAnalysis] = useState(null);
+  const [analysisError, setAnalysisError] = useState("");
 
   const set = (key) => (e) => {
     const value = key === "vin" ? e.target.value.toUpperCase() : e.target.value;
     setV((current) => ({ ...current, [key]: value }));
     setAnalysis(null);
+    setAnalysisError("");
   };
 
   const n = (key) => Number(v[key]) || 0;
-
-  const live = useMemo(() => calculate(v), [v]);
 
   async function decodeVin() {
     const vin = v.vin.trim().toUpperCase();
@@ -82,6 +82,7 @@ export default function Home() {
 
       setVinState({ loading: false, error: "", decoded: data });
       setAnalysis(null);
+      setAnalysisError("");
     } catch (error) {
       setVinState({
         loading: false,
@@ -92,13 +93,34 @@ export default function Home() {
   }
 
   function analyzeVehicle() {
-    setAnalysis({
-      ...live,
-      timestamp: new Date().toISOString(),
-    });
-  }
+    if (n("market") <= 0) {
+      setAnalysisError("Enter an expected resale / market value first.");
+      setAnalysis(null);
+      return;
+    }
 
-  const shown = analysis || live;
+    if (n("currentBid") < 0) {
+      setAnalysisError("Current bid cannot be negative.");
+      setAnalysis(null);
+      return;
+    }
+
+    setAnalysisError("");
+    setAnalysis({
+      ...calculate(v),
+      analyzedAt: new Date().toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    });
+
+    setTimeout(() => {
+      document.getElementById("analysis-result")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 50);
+  }
 
   return (
     <main>
@@ -119,8 +141,8 @@ export default function Home() {
           Know your number <em>before</em> you bid.
         </h1>
         <p>
-          Decode the VIN, enter the auction facts, and get a disciplined
-          dealer-side BUY / CAUTION / PASS decision.
+          Decode the VIN, enter the auction facts, and click Analyze Vehicle
+          to get a BUY / CAUTION / PASS decision.
         </p>
       </section>
 
@@ -147,6 +169,7 @@ export default function Home() {
                 }}
               />
               <button
+                type="button"
                 className="decodeButton"
                 onClick={decodeVin}
                 disabled={vinState.loading}
@@ -255,96 +278,114 @@ export default function Home() {
             <Money label="Base risk reserve" k="reserve" v={v.reserve} set={set} />
           </div>
 
-          <button className="analyzeButton" onClick={analyzeVehicle}>
+          {analysisError && <div className="vinError">{analysisError}</div>}
+
+          <button type="button" className="analyzeButton" onClick={analyzeVehicle}>
             Analyze Vehicle
           </button>
 
           <p className="finePrint">
-            BidPilot v0.3 uses your market-value and repair assumptions, then
-            adds risk for mileage and condition. Automated market comps and
-            condition-report analysis come next.
+            Results are created only after you click Analyze Vehicle. If you
+            change an input afterward, the prior result is cleared until you
+            analyze again.
           </p>
         </section>
 
-        <aside className="card result">
-          <div className="resultTop">
-            <span className="eyebrow">BIDPILOT VERDICT</span>
-            <span className={`verdict ${shown.verdict.toLowerCase()}`}>
-              {shown.verdict}
-            </span>
-          </div>
-
-          <div className="vehicleLine">
-            {vehicleName(v) || "Vehicle not decoded yet"}
-          </div>
-
-          <div className="metric safe">
-            <span>SAFE BID</span>
-            <b>{usd.format(shown.safeBid)}</b>
-            <small>Preferred purchase ceiling</small>
-          </div>
-
-          <div className="metric">
-            <span>MAX BID</span>
-            <b>{usd.format(shown.maxBid)}</b>
-            <small>Hard ceiling for this deal</small>
-          </div>
-
-          <div className="bidStatus">
-            <div>
-              <span>Current bid</span>
-              <b>{usd.format(n("currentBid"))}</b>
+        <aside className="card result" id="analysis-result">
+          {!analysis ? (
+            <div className="waitingState">
+              <span className="eyebrow">BIDPILOT VERDICT</span>
+              <span className="verdict ready">READY</span>
+              <div className="waitingIcon">B</div>
+              <h3>Ready to analyze this vehicle.</h3>
+              <p>
+                Enter the auction and underwriting assumptions, then click
+                <b> Analyze Vehicle</b>.
+              </p>
             </div>
-            <div>
-              <span>Room to SAFE BID</span>
-              <b className={shown.roomToSafe >= 0 ? "positive" : "negative"}>
-                {shown.roomToSafe >= 0 ? "+" : ""}
-                {usd.format(shown.roomToSafe)}
-              </b>
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className="resultTop">
+                <span className="eyebrow">BIDPILOT VERDICT</span>
+                <span className={`verdict ${analysis.verdict.toLowerCase()}`}>
+                  {analysis.verdict}
+                </span>
+              </div>
 
-          <div className="summary">
-            <p>
-              <span>Market value</span>
-              <b>{usd.format(n("market"))}</b>
-            </p>
-            <p>
-              <span>Repairs + fees + transport</span>
-              <b>-{usd.format(shown.costs)}</b>
-            </p>
-            <p>
-              <span>Risk adjustment</span>
-              <b>-{usd.format(shown.adjustedReserve)}</b>
-            </p>
-            <p>
-              <span>Profit at current bid</span>
-              <b className={shown.profitAtCurrent >= 0 ? "positive" : "negative"}>
-                {usd.format(shown.profitAtCurrent)}
-              </b>
-            </p>
-          </div>
+              <div className="vehicleLine">
+                {vehicleName(v) || "Vehicle not decoded yet"}
+                <small>Analyzed {analysis.analyzedAt}</small>
+              </div>
 
-          <div className="riskBox">
-            <span>Risk profile</span>
-            <div className="riskLine">
-              <span>Condition adjustment</span>
-              <b>{usd.format(shown.conditionRisk)}</b>
-            </div>
-            <div className="riskLine">
-              <span>Mileage adjustment</span>
-              <b>{usd.format(shown.mileageRisk)}</b>
-            </div>
-            <div className="riskLine">
-              <span>Total reserve</span>
-              <b>{usd.format(shown.adjustedReserve)}</b>
-            </div>
-          </div>
+              <div className="metric safe">
+                <span>SAFE BID</span>
+                <b>{usd.format(analysis.safeBid)}</b>
+                <small>Preferred purchase ceiling</small>
+              </div>
 
-          <div className="decisionText">
-            <b>{shown.headline}</b>
-            <p>{shown.explanation}</p>
-          </div>
+              <div className="metric">
+                <span>MAX BID</span>
+                <b>{usd.format(analysis.maxBid)}</b>
+                <small>Hard ceiling for this deal</small>
+              </div>
+
+              <div className="bidStatus">
+                <div>
+                  <span>Current bid</span>
+                  <b>{usd.format(n("currentBid"))}</b>
+                </div>
+                <div>
+                  <span>Room to SAFE BID</span>
+                  <b className={analysis.roomToSafe >= 0 ? "positive" : "negative"}>
+                    {analysis.roomToSafe >= 0 ? "+" : ""}
+                    {usd.format(analysis.roomToSafe)}
+                  </b>
+                </div>
+              </div>
+
+              <div className="summary">
+                <p>
+                  <span>Market value</span>
+                  <b>{usd.format(n("market"))}</b>
+                </p>
+                <p>
+                  <span>Repairs + fees + transport</span>
+                  <b>-{usd.format(analysis.costs)}</b>
+                </p>
+                <p>
+                  <span>Risk adjustment</span>
+                  <b>-{usd.format(analysis.adjustedReserve)}</b>
+                </p>
+                <p>
+                  <span>Profit at current bid</span>
+                  <b className={analysis.profitAtCurrent >= 0 ? "positive" : "negative"}>
+                    {usd.format(analysis.profitAtCurrent)}
+                  </b>
+                </p>
+              </div>
+
+              <div className="riskBox">
+                <span>Risk profile</span>
+                <div className="riskLine">
+                  <span>Condition adjustment</span>
+                  <b>{usd.format(analysis.conditionRisk)}</b>
+                </div>
+                <div className="riskLine">
+                  <span>Mileage adjustment</span>
+                  <b>{usd.format(analysis.mileageRisk)}</b>
+                </div>
+                <div className="riskLine">
+                  <span>Total reserve</span>
+                  <b>{usd.format(analysis.adjustedReserve)}</b>
+                </div>
+              </div>
+
+              <div className="decisionText">
+                <b>{analysis.headline}</b>
+                <p>{analysis.explanation}</p>
+              </div>
+            </>
+          )}
         </aside>
       </div>
     </main>
